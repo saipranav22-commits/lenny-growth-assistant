@@ -27,6 +27,7 @@ from schemas import (
 def sanitize_for_db(obj):
     if isinstance(obj, str):
         obj = obj.replace('\x00', '')
+        obj = obj.replace('\u202f', ' ').replace('\u200b', '').replace('\u2011', '-')
         return obj.encode('cp1252', errors='ignore').decode('cp1252')
     elif isinstance(obj, list):
         return [sanitize_for_db(item) for item in obj]
