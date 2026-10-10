@@ -1,0 +1,129 @@
+.artifact-viewer {
+  width: 450px;
+  background: rgba(15, 23, 42, 0.7);
+  backdrop-filter: blur(20px);
+  border-left: 1px solid rgba(255, 255, 255, 0.05);
+  display: flex;
+  flex-direction: column;
+  box-shadow: -10px 0 30px rgba(0, 0, 0, 0.2);
+  z-index: 50;
+  animation: slideIn 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes slideIn {
+  from { transform: translateX(100%); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+
+.artifact-header {
+  padding: 20px 24px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.artifact-header h2 {
+  font-size: 16px;
+  font-weight: 600;
+  color: #f8fafc;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.artifact-header h2::before {
+  content: '';
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  background: linear-gradient(135deg, #a855f7, #ec4899);
+  border-radius: 4px;
+}
+.close-btn {
+  background: rgba(255, 255, 255, 0.05);
+  border: none;
+  color: #94a3b8;
+  width: 28px;
+  height: 28px;
+  border-radius: 14px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+}
+.close-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: white;
+}
+
+.artifact-content-area {
+  flex: 1;
+  overflow-y: auto;
+  padding: 24px;
+  background: rgba(0, 0, 0, 0.2);
+  font-size: 14px;
+  line-height: 1.7;
+  color: #cbd5e1;
+}
+
+.artifact-actions {
+  padding: 16px 24px;
+  background: rgba(15, 23, 42, 0.8);
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
+  display: flex;
+  gap: 12px;
+}
+.artifact-actions button {
+  flex: 1;
+  padding: 10px;
+  background: rgba(255, 255, 255, 0.05);
+  color: white;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.artifact-actions button:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.artifact-tabs {
+  display: flex;
+  gap: 10px;
+  padding: 0 24px 10px 24px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+.artifact-tabs button {
+  background: transparent;
+  color: #94a3b8;
+  border: none;
+  padding: 8px 16px;
+  cursor: pointer;
+  border-radius: 4px;
+  font-weight: 500;
+  transition: all 0.2s;
+}
+.artifact-tabs button.active {
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+}
+.artifact-tabs button:hover:not(.active) {
+  color: #cbd5e1;
+}
+
+.artifact-citations {
+  padding: 16px 24px;
+  background: rgba(0, 0, 0, 0.4);
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
+  font-size: 0.85em;
+  color: #94a3b8;
+}
+.artifact-citations h4 {
+  margin: 0 0 8px 0;
+  color: #f8fafc;
+}
+.artifact-citations ul {
+  margin: 0;
+  padding-left: 20px;
+}

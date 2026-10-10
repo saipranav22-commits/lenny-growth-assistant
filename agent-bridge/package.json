@@ -1,0 +1,20 @@
+{
+  "name": "agent-bridge",
+  "version": "1.0.0",
+  "description": "Pi Coding Agent HTTP bridge for Lenny Growth Assistant",
+  "main": "dist/server.js",
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/server.js",
+    "dev": "node --import tsx/esm src/server.ts",
+    "test-poc": "node test-pi.mjs"
+  },
+  "dependencies": {
+    "@earendil-works/pi-coding-agent": "^1.0.0"
+  },
+  "devDependencies": {
+    "tsx": "^4.23.15",
+    "typescript": "^5.9.3"
+  }
+}
