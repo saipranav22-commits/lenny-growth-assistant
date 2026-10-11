@@ -2,6 +2,9 @@ import React, { useState, useEffect, useRef } from 'react';
 import './App.css';
 import { SourceExplorer } from './components/SourceExplorer';
 import ArtifactViewer from './components/ArtifactViewer';
+import { BrandLogo } from './components/BrandLogo';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 
 // ── Types ───────────────────────────────────────────────────────────────────
 interface Session {
@@ -32,20 +35,6 @@ interface MessageOut {
   artifact_content?: string
 }
 
-// ── Brand Logo ──────────────────────────────────────────────────────────────
-const BrandLogo = () => (
-  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-    {/* Podcast waveform */}
-    <rect x="3" y="12" width="3" height="6" rx="1" fill="#152641" />
-    <rect x="7" y="8" width="3" height="10" rx="1" fill="#152641" />
-    <rect x="11" y="4" width="3" height="14" rx="1" fill="#152641" />
-    {/* Evidence node */}
-    <circle cx="17" cy="14" r="3" fill="#0D9488" />
-    {/* Growth direction arrow */}
-    <path d="M17 14L21 6M21 6H16M21 6V11" stroke="#FF715B" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-  </svg>
-);
-
 // ── API helpers ───────────────────────────────────────────────────────────────
 const API_BASE = '/api';
 
@@ -69,6 +58,36 @@ async function fetchChatHistory(sessionId: string): Promise<MessageOut[]> {
   const res = await fetch(`${API_BASE}/sessions/${sessionId}/messages`);
   if (!res.ok) throw new Error('Failed to fetch history');
   return res.json();
+}
+
+// ── Date & Timestamp Helpers ──────────────────────────────────────────────────
+/**
+ * Safely parses backend timestamps into a Date object.
+ * Interprets timezone-naive timestamps (such as FastAPI/SQLAlchemy UTC datetimes)
+ * as UTC by appending 'Z'. Preserves timestamps that already contain 'Z' or a timezone offset.
+ */
+export function parseUtcDate(timestamp: string | undefined | null): Date {
+  if (!timestamp) return new Date(NaN);
+  const trimmed = String(timestamp).trim();
+  if (!trimmed) return new Date(NaN);
+
+  // Check if timestamp already has a timezone indicator:
+  // - Ends with 'Z' or 'z'
+  // - Has a timezone offset after the time component (e.g. +05:30, -04:00, +0000)
+  const hasTimezone = /[zZ]$/.test(trimmed) || /[T\s]\d{2}:\d{2}.*[+-]\d{2}(?::?\d{2})?$/.test(trimmed);
+  if (hasTimezone) {
+    return new Date(trimmed);
+  }
+
+  // Interpret timezone-naive backend datetime with time component as UTC
+  if (trimmed.includes('T')) {
+    return new Date(`${trimmed}Z`);
+  }
+  if (trimmed.includes(' ') && /\d{2}:\d{2}/.test(trimmed)) {
+    return new Date(`${trimmed.replace(' ', 'T')}Z`);
+  }
+
+  return new Date(trimmed);
 }
 
 // ── Main App ────────────────────────────────────────────────────────────────
@@ -185,6 +204,17 @@ function App() {
 
   async function generateArtifact(type: 'action_brief' | 'essay' | 'markdown' | 'html/css') {
     if (!activeId) return;
+
+    // Use latest meaningful user growth question from the current session as the topic
+    const latestUserMsg = [...messages].reverse().find(m => m.role === 'user' && m.content && m.content.trim().length > 0);
+    const latestQuestion = latestUserMsg ? latestUserMsg.content.trim() : '';
+
+    if (!latestQuestion) {
+      setError('Please ask a growth strategy question first before generating a brief.');
+      document.getElementById('message-input')?.focus();
+      return;
+    }
+
     setLoading(true);
     setError(null);
 
@@ -192,7 +222,7 @@ function App() {
     let payload: any = {
       session_id: activeId,
       format: type,
-      topic: type,
+      topic: latestQuestion,
       company_stage: showFounderContext ? founderContext.companyStage || null : null,
       team_size: showFounderContext ? founderContext.teamSize || null : null,
       current_challenge: showFounderContext ? founderContext.currentChallenge || null : null,
@@ -203,7 +233,7 @@ function App() {
       endpoint = `${API_BASE}/skills/ship30`;
       payload = {
         session_id: activeId,
-        topic: type
+        topic: latestQuestion
       };
     }
 
@@ -227,7 +257,20 @@ function App() {
 
   const formatTime = (ts: string) => {
     try {
-      return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      const d = parseUtcDate(ts);
+      if (isNaN(d.getTime())) return '';
+      const timeStr = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+      return timeStr.replace(/\b(am|pm)\b/i, m => m.toUpperCase());
+    } catch {
+      return '';
+    }
+  };
+
+  const formatDate = (ts: string) => {
+    try {
+      const d = parseUtcDate(ts);
+      if (isNaN(d.getTime())) return '';
+      return d.toLocaleDateString();
     } catch {
       return '';
     }
@@ -249,7 +292,7 @@ function App() {
       <aside className={`sidebar ${sidebarOpen ? 'open' : ''}`}>
         <div className="sidebar-header">
           <div className="logo-container">
-            <BrandLogo />
+            <BrandLogo size={36} variant="sidebar" />
             <span className="logo-text">Lenny Growth Assistant</span>
           </div>
           <button className="mobile-close-btn" onClick={() => setSidebarOpen(false)}>
@@ -273,7 +316,7 @@ function App() {
                 onClick={() => setActiveId(s.id)}
               >
                 <span className="session-title">{s.title || 'Conversation'}</span>
-                <span className="session-date">{new Date(s.created_at).toLocaleDateString()}</span>
+                <span className="session-date">{formatDate(s.created_at)}</span>
               </button>
             ))
           )}
@@ -332,7 +375,7 @@ function App() {
           {messages.length === 0 && !loading && (
             <div className="welcome">
               <div className="welcome-hero-icon">
-                <BrandLogo />
+                <BrandLogo size={48} variant="welcome" />
               </div>
               <h2>Welcome to Lenny Growth Assistant.</h2>
               <p className="subtitle">
@@ -368,17 +411,37 @@ function App() {
           {messages.map(m => (
             <div key={m.id} className={`message ${m.role}`}>
               <div className="bubble">
-                <pre className="content">{m.content}</pre>
+                {m.role === 'assistant' ? (
+                  <div className="assistant-markdown">
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                      {m.content}
+                    </ReactMarkdown>
+                  </div>
+                ) : (
+                  <div className="user-content">{m.content}</div>
+                )}
 
                 {m.citations && m.citations.length > 0 && (
                   <div className="citations-container">
-                    <div className="citations-header">Verified Evidence</div>
+                    <div className="citations-header">
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                      Verified Evidence
+                    </div>
                     <ul className="citations-list">
                       {m.citations.map((c, i) => (
                         <li key={i}>
-                          <button className="citation-link" onClick={() => setActiveCitation(c)}>
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>
-                            {c.title}
+                          <button
+                            className="citation-link"
+                            onClick={() => setActiveCitation(c)}
+                            title={`${c.title} (Source: ${c.source_file}, Chunk #${c.chunk_id})`}
+                            aria-label={`Evidence passage ${i + 1}: ${c.guest || c.title}, chunk ${c.chunk_id}`}
+                          >
+                            <span className="citation-num">#{i + 1}</span>
+                            <span className="citation-guest">{c.guest || c.title}</span>
+                            {c.chunk_id && <span className="citation-chunk-pill">Chunk {c.chunk_id}</span>}
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="citation-check-icon">
+                              <polyline points="20 6 9 17 4 12"></polyline>
+                            </svg>
                           </button>
                         </li>
                       ))}

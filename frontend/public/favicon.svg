@@ -1,7 +1,13 @@
-<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-  <rect x="3" y="12" width="3" height="6" rx="1" fill="#152641" />
-  <rect x="7" y="8" width="3" height="10" rx="1" fill="#152641" />
-  <rect x="11" y="4" width="3" height="14" rx="1" fill="#152641" />
-  <circle cx="17" cy="14" r="3" fill="#0D9488" />
-  <path d="M17 14L21 6M21 6H16M21 6V11" stroke="#FF715B" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+<svg width="32" height="32" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Brand container: Navy #152641 for perfect contrast on any browser theme -->
+  <rect width="32" height="32" rx="7" fill="#152641" />
+  <!-- Waveform bars: Rising podcast knowledge -->
+  <rect x="5" y="16" width="3.5" height="10" rx="1.75" fill="#F8F4EA" opacity="0.8" />
+  <rect x="11" y="11" width="3.5" height="15" rx="1.75" fill="#F8F4EA" />
+  <rect x="17" y="6" width="3.5" height="20" rx="1.75" fill="#FF715B" />
+  <!-- Evidence node: Teal #0D9488 with Cream core -->
+  <circle cx="24.5" cy="9.5" r="4" fill="#0D9488" />
+  <circle cx="24.5" cy="9.5" r="1.75" fill="#F8F4EA" />
+  <!-- Growth anchor -->
+  <rect x="23" y="17" width="3" height="9" rx="1.5" fill="#0D9488" opacity="0.9" />
 </svg>

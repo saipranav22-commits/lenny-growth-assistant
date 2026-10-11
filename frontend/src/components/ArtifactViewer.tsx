@@ -16,6 +16,82 @@ interface ArtifactViewerProps {
   onClose: () => void;
 }
 
+/**
+ * Strips outer enclosing Markdown code fences (e.g. ```markdown ... ``` or ``` ... ```)
+ * so that ReactMarkdown renders actual headings, paragraphs, lists, and tables instead
+ * of displaying the entire document inside a single code block.
+ * Preserves internal code fences and leaves the original content untouched for Source view.
+ */
+export function stripOuterCodeFences(text: string): string {
+  if (!text) return '';
+  const lines = text.split(/\r?\n/);
+
+  // Find first non-empty line
+  let startIdx = -1;
+  for (let i = 0; i < lines.length; i++) {
+    if (lines[i].trim().length > 0) {
+      startIdx = i;
+      break;
+    }
+  }
+
+  if (startIdx === -1) return text;
+
+  const firstLineTrimmed = lines[startIdx].trim();
+  // Check if first non-empty line is an opening code fence (```, ```markdown, ```md, etc.)
+  const openFenceMatch = /^`{3,}\s*(?:markdown|md|[a-zA-Z0-9_-]+)?\s*$/i.test(firstLineTrimmed);
+  if (!openFenceMatch) {
+    return text;
+  }
+
+  // Find the matching closing fence line
+  let depth = 1;
+  let closeIdx = -1;
+  for (let i = startIdx + 1; i < lines.length; i++) {
+    const trimmed = lines[i].trim();
+    if (trimmed.startsWith('```')) {
+      // If line has an info string (e.g. ```sql, ```python), it opens a nested code block
+      if (/^`{3,}\s*[a-zA-Z0-9_-]+/i.test(trimmed)) {
+        depth++;
+      } else if (/^`{3,}\s*$/.test(trimmed)) {
+        // Line containing only backticks (and optional harmless whitespace) closes a block
+        depth--;
+        if (depth === 0) {
+          closeIdx = i;
+          break;
+        }
+      }
+    }
+  }
+
+  // Fallback: if depth didn't reach 0, search backwards for any line with only closing backticks
+  if (closeIdx === -1) {
+    for (let i = lines.length - 1; i > startIdx; i--) {
+      if (/^`{3,}\s*$/.test(lines[i].trim())) {
+        closeIdx = i;
+        break;
+      }
+    }
+  }
+
+  if (closeIdx !== -1) {
+    // Return all lines excluding startIdx and closeIdx
+    const remaining = [
+      ...lines.slice(0, startIdx),
+      ...lines.slice(startIdx + 1, closeIdx),
+      ...lines.slice(closeIdx + 1)
+    ];
+    return remaining.join('\n');
+  }
+
+  // If no closing fence found, strip at least the opening fence line
+  const remaining = [
+    ...lines.slice(0, startIdx),
+    ...lines.slice(startIdx + 1)
+  ];
+  return remaining.join('\n');
+}
+
 export default function ArtifactViewer({ artifact, onClose }: ArtifactViewerProps) {
   const [activeTab, setActiveTab] = useState<'preview' | 'source'>('preview');
   const [copied, setCopied] = useState(false);
@@ -48,6 +124,96 @@ export default function ArtifactViewer({ artifact, onClose }: ArtifactViewerProp
       </body>
     </html>
   `;
+
+  // Clean up legacy mojibake characters (UTF-8 bytes misinterpreted as latin-1)
+  const sanitizedContent = (artifact.content || '')
+    .replace(/\u00e2\u0080\u0093/g, '–')
+    .replace(/\u00e2\u0080\u0094/g, '—')
+    .replace(/\u00e2\u0080\u0098/g, '‘')
+    .replace(/\u00e2\u0080\u0099/g, '’')
+    .replace(/\u00e2\u0080\u009c/g, '“')
+    .replace(/\u00e2\u0080\u009d/g, '”')
+    .replace(/\u00e2\u0080\u00a2/g, '•')
+    .replace(/\u00e2\u0086\u0092/g, '→');
+
+  // Strip enclosing outer code fences for Preview so headings and tables render natively
+  const previewContent = stripOuterCodeFences(sanitizedContent);
+
+  const extractText = (node: any): string => {
+    if (!node) return '';
+    if (typeof node === 'string' || typeof node === 'number') return String(node);
+    if (Array.isArray(node)) return node.map(extractText).join(' ');
+    if (node.props && node.props.children) return extractText(node.props.children);
+    return String(node);
+  };
+
+  const renderHeading = (Tag: 'h2' | 'h3', props: any, children: any) => {
+    if (isEssay) {
+      return Tag === 'h2' ? (
+        <h2 className="editorial-h2" {...props}>{children}</h2>
+      ) : (
+        <h3 className="editorial-h3" {...props}>{children}</h3>
+      );
+    }
+    if (isActionBrief) {
+      const rawText = extractText(children).toLowerCase();
+      let badgeText = '';
+      let badgeClass = '';
+      let highlightClass = '';
+
+      if (rawText.includes('recommendation')) {
+        badgeText = 'RECOMMENDATION';
+        badgeClass = 'badge-coral';
+        highlightClass = 'highlight-recommendation';
+      } else if (rawText.includes('metric') || rawText.includes('success metric')) {
+        badgeText = 'MEASURABLE METRIC';
+        badgeClass = 'badge-gold';
+        highlightClass = 'highlight-metric';
+      } else if (rawText.includes('experiment') || rawText.includes('sevenday') || rawText.includes('seven-day')) {
+        badgeText = '7-DAY EXPERIMENT';
+        badgeClass = 'badge-teal';
+        highlightClass = 'highlight-experiment';
+      } else if (rawText.includes('apply') || rawText.includes('applicability')) {
+        badgeText = 'APPLICABILITY ANALYSIS';
+        badgeClass = 'badge-navy';
+        highlightClass = 'highlight-context';
+      } else if (rawText.includes('insight') || rawText.includes('evidence')) {
+        badgeText = 'PODCAST-BACKED INSIGHT';
+        badgeClass = 'badge-teal';
+        highlightClass = 'highlight-evidence';
+      } else if (rawText.includes('situation') || rawText.includes('founder') || rawText.includes('business')) {
+        badgeText = 'FOUNDER CONTEXT';
+        badgeClass = 'badge-navy';
+        highlightClass = 'highlight-context';
+      } else if (rawText.includes('risk') || rawText.includes('limitation')) {
+        badgeText = 'RISK / LIMITATION';
+        badgeClass = 'badge-ruby';
+        highlightClass = 'highlight-risk';
+      } else if (rawText.includes('citation') || rawText.includes('supporting')) {
+        badgeText = 'SUPPORTING CITATIONS';
+        badgeClass = 'badge-navy';
+        highlightClass = 'highlight-evidence';
+      }
+
+      const HeadingTag = Tag === 'h2' ? 'h2' : 'h3';
+      const headingClass = Tag === 'h2' ? 'ab-h2' : 'ab-h3';
+
+      if (badgeText) {
+        return (
+          <div className={`ab-section-container ${highlightClass}`}>
+            <span className={`ab-pill-badge ${badgeClass}`}>{badgeText}</span>
+            <HeadingTag className={headingClass} {...props}>{children}</HeadingTag>
+          </div>
+        );
+      }
+      return <HeadingTag className={headingClass} {...props}>{children}</HeadingTag>;
+    }
+    return Tag === 'h2' ? (
+      <h2 className="artifact-h2" {...props}>{children}</h2>
+    ) : (
+      <h3 className="artifact-h3" {...props}>{children}</h3>
+    );
+  };
 
   return (
     <aside className={`artifact-viewer-container ${isEssay ? 'wide' : ''}`}>
@@ -129,24 +295,14 @@ export default function ArtifactViewer({ artifact, onClose }: ArtifactViewerProp
                       </div>
                     ),
                     h1: ({node, ...props}: any) => {
-                       if(isEssay) return <h1 className="editorial-h1" {...props} />;
-                       return <h1 {...props} />;
+                       if (isEssay) return <h1 className="editorial-h1" {...props} />;
+                       return <h1 className="artifact-h1" {...props} />;
                     },
-                    h2: ({node, ...props}: any) => {
-                      let className = '';
-                      if (isActionBrief) {
-                        const text = String(props.children).toLowerCase();
-                        if (text.includes('founder') || text.includes('challenge')) className = 'ab-navy';
-                        else if (text.includes('evidence') || text.includes('observation')) className = 'ab-teal';
-                        else if (text.includes('recommendation') || text.includes('action')) className = 'ab-coral';
-                        else if (text.includes('experiment') || text.includes('metric') || text.includes('plan')) className = 'ab-gold';
-                      }
-                      if(isEssay) className = 'editorial-h2';
-                      return <h2 className={className} {...props} />;
-                    }
+                    h2: ({node, children, ...props}: any) => renderHeading('h2', props, children),
+                    h3: ({node, children, ...props}: any) => renderHeading('h3', props, children)
                   }}
                 >
-                  {artifact.content}
+                  {previewContent}
                 </ReactMarkdown>
               </div>
             )}
