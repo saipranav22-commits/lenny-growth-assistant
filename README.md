@@ -66,8 +66,11 @@ This script will read `molly-graham-2.md` and `peter-sellis.md` from `backend/da
 ```powershell
 cd agent-bridge
 npm install
+npm run setup
+npm run build
 npm start
 ```
+*Note*: The Pi SDK relies on local runtime configuration templates (`templates/models.json.example` and `templates/auth.json.example`). Running `npm run setup` safely provisions `.pi/models.json` and `.pi/auth.json` if missing, without overwriting existing configurations or exposing credentials. For cloud Groq models, configure `GROQ_API_KEY` via `.env` or environment variables.
 
 ### 2. Backend (FastAPI)
 ```powershell

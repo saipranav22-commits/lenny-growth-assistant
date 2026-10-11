@@ -21,4 +21,6 @@ check_counts.py
 get_rag.py
 test_data_integrity.py
 test_api_real.py
+.pi/
+agent-bridge/.pi/
 

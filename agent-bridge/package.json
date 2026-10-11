@@ -6,6 +6,7 @@
   "type": "module",
   "scripts": {
     "build": "tsc",
+    "setup": "node setup-config.mjs",
     "start": "node dist/server.js",
     "dev": "node --import tsx/esm src/server.ts",
     "test-poc": "node test-pi.mjs"

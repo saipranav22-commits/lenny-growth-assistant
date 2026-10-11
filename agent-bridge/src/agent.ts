@@ -5,6 +5,7 @@ import {
   SessionManager,
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
+import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 import { config } from "./config.js";
@@ -12,16 +13,46 @@ import { config } from "./config.js";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const agentDir = path.join(__dirname, "..", ".pi");
 
+function ensureRuntimeConfig(): void {
+  const modelsPath = path.join(agentDir, "models.json");
+  const authPath = path.join(agentDir, "auth.json");
+  const templatesDir = path.join(__dirname, "..", "templates");
+
+  if (!fs.existsSync(agentDir)) {
+    fs.mkdirSync(agentDir, { recursive: true });
+  }
+
+  if (!fs.existsSync(modelsPath)) {
+    const templateModels = path.join(templatesDir, "models.json.example");
+    if (fs.existsSync(templateModels)) {
+      fs.copyFileSync(templateModels, modelsPath);
+    }
+  }
+
+  if (!fs.existsSync(authPath)) {
+    const templateAuth = path.join(templatesDir, "auth.json.example");
+    if (fs.existsSync(templateAuth)) {
+      fs.copyFileSync(templateAuth, authPath);
+    } else {
+      fs.writeFileSync(authPath, "{}\n", "utf8");
+    }
+  }
+}
+
 // Shared ModelRuntime – initialised once on startup
 let modelRuntime: ModelRuntime | null = null;
 
 async function getModelRuntime(): Promise<ModelRuntime> {
   if (!modelRuntime) {
+    ensureRuntimeConfig();
     modelRuntime = await ModelRuntime.create({
       modelsPath: path.join(agentDir, "models.json"),
       authPath: path.join(agentDir, "auth.json"),
     });
     await modelRuntime.setRuntimeApiKey("openai", "dummy");
+    if (process.env.GROQ_API_KEY) {
+      await modelRuntime.setRuntimeApiKey("groq", process.env.GROQ_API_KEY);
+    }
   }
   return modelRuntime;
 }
