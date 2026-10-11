@@ -378,7 +378,7 @@ The system aims to provide:
 
 The demonstration showcases local Ollama inference, source-grounded answers, Source Explorer, Founder Fit, Strategy Brief, Ship 30 essays, and the application architecture.
 
-**Video:** Add the YouTube demo link after recording and uploading.
+**Video:** 
 
 ---
 
