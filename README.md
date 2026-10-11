@@ -1,3 +1,13 @@
+<p align="center">
+  <img src="frontend/public/favicon.svg" alt="Lenny Growth Assistant Logo" width="72" />
+</p>
+
+<h1 align="center">Lenny Growth Assistant</h1>
+
+<p align="center">
+  AI-powered growth strategy assistant grounded in Lenny's Podcast
+</p>
+
 # Lenny Growth Assistant
 
 **An evidence-to-action AI workspace for startup founders, product managers, and growth teams.**
