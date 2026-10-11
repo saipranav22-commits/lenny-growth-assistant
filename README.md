@@ -8,8 +8,6 @@
   AI-powered growth strategy assistant grounded in Lenny's Podcast
 </p>
 
-# Lenny Growth Assistant
-
 **An evidence-to-action AI workspace for startup founders, product managers, and growth teams.**
 
 Built for the **Oogway Labs — Forward Deployed Engineer Take-Home Assignment**.
