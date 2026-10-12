@@ -466,17 +466,19 @@ Clearly distinguish User-provided information, Verified podcast evidence, and Mo
             if context_str
             else "Transcript evidence is insufficient for this topic. Explicitly communicate this limitation in the document rather than inventing podcast facts or claims."
         )
-        prompt = f"""You are an expert product strategist and UI designer.
-Create a complete, beautifully designed, standalone HTML/CSS page summarizing tactical growth advice for: {body.topic}.
+        prompt = f"""You are an expert product strategist.
+Create a concise, standalone HTML/CSS page summarizing tactical growth advice for: {body.topic}.
+Keep the document concise (under 250 words total) so it completes fully without truncation.
 {founder_context}{evidence_prompt}
 MANDATORY RULES:
-1. Return ONLY the raw, renderable HTML document.
-2. Embed all CSS styles inside a <style> block in the <head>. Include elegant typography, modern color palette, card components, metrics, and structured sections.
-3. NEVER output markdown code blocks or code fences (NEVER write ```html or ```).
-4. NEVER output any conversational intro, explanation, or outro text before or after the HTML.
-5. The output MUST begin directly with <!DOCTYPE html> or <html>.
-6. Do NOT include any <script> tags or JavaScript.
-7. {limitation_rule}"""
+1. Return ONLY the raw HTML document starting directly with <!DOCTYPE html> and closing with </html>.
+2. Keep embedded CSS minimal and under 15 lines inside a <style> tag in <head>.
+3. Prioritize visible <body> content: include an <h1>, 2-3 concise <h2> sections or cards with bullet points, and key takeaways.
+4. The document MUST include full <body> content and close with </body></html>.
+5. NEVER output markdown code blocks or code fences (NEVER write ```html or ```).
+6. NEVER output any conversational intro, explanation, or outro text before or after the HTML.
+7. Do NOT include any <script> tags or JavaScript.
+8. {limitation_rule}"""
     else:
         evidence_prompt = (
             f"\n=== PODCAST EVIDENCE ===\n{context_str}\n=== END EVIDENCE ===\n"
@@ -515,6 +517,29 @@ MANDATORY GUIDELINES:
         raw_answer = "Could not generate artifact."
     if body.format == "html/css":
         raw_answer = extract_clean_html(raw_answer)
+        has_body = bool(re.search(r'<body[\s>]', raw_answer, re.IGNORECASE))
+        has_close = bool(re.search(r'</(?:body|html)>', raw_answer, re.IGNORECASE))
+        open_style = len(re.findall(r'<style[^>]*>', raw_answer, re.IGNORECASE))
+        close_style = len(re.findall(r'</style>', raw_answer, re.IGNORECASE))
+
+        if not has_body or not has_close or (open_style > close_style):
+            logger.warning("HTML/CSS artifact generation incomplete: has_body=%s, has_close=%s", has_body, has_close)
+            msg = Message(
+                session_id=body.session_id,
+                role='assistant',
+                content="HTML/CSS generation failed: output was truncated before complete body could be generated.",
+                provider=settings.llm_provider,
+                model=settings.llm_model,
+                citations=sanitize_for_db(citations_data),
+                artifact_type="error",
+                artifact_content="Artifact Generation Failed: Output was truncated before visible <body> content was produced. Please try regenerating."
+            )
+            db.add(msg)
+            db.commit()
+            db.refresh(msg)
+            return MessageOut.model_validate(msg)
+        if not re.search(r'</html>', raw_answer, re.IGNORECASE):
+            raw_answer += "\n</html>"
     answer = sanitize_for_db(raw_answer)
 
     # Citations must strictly derive from authentic database records, never hallucinated from LLM output

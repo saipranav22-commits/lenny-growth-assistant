@@ -109,16 +109,28 @@ export function prepareSecureHtml(rawContent: string): string {
   const isFullDoc = /<!doctype\s+html/i.test(content) || /<html[\s>]/i.test(content);
 
   if (isFullDoc) {
-    if (/<head[\s>]/i.test(content)) {
-      if (!content.includes('Content-Security-Policy')) {
-        return content.replace(/<head([^>]*)>/i, `<head$1>\n    ${cspMeta}`);
+    let processed = content;
+    const openStyle = (processed.match(/<style[^>]*>/gi) || []).length;
+    const closeStyle = (processed.match(/<\/style>/gi) || []).length;
+    if (openStyle > closeStyle) {
+      processed += '\n</style>';
+    }
+    const openHead = (processed.match(/<head[^>]*>/gi) || []).length;
+    const closeHead = (processed.match(/<\/head>/gi) || []).length;
+    if (openHead > closeHead) {
+      processed += '\n</head>';
+    }
+
+    if (/<head[\s>]/i.test(processed)) {
+      if (!processed.includes('Content-Security-Policy')) {
+        return processed.replace(/<head([^>]*)>/i, `<head$1>\n    ${cspMeta}`);
       }
-      return content;
+      return processed;
     }
-    if (/<html[\s>]/i.test(content)) {
-      return content.replace(/<html([^>]*)>/i, `<html$1>\n  <head>\n    ${cspMeta}\n  </head>`);
+    if (/<html[\s>]/i.test(processed)) {
+      return processed.replace(/<html([^>]*)>/i, `<html$1>\n  <head>\n    ${cspMeta}\n  </head>`);
     }
-    return `${cspMeta}\n${content}`;
+    return `${cspMeta}\n${processed}`;
   }
 
   // HTML fragment: wrap in standard container
@@ -149,6 +161,7 @@ export default function ArtifactViewer({ artifact, onClose }: ArtifactViewerProp
   };
 
   const isHtml = artifact.type === 'html/css';
+  const isHtmlTruncated = isHtml && (!/<body[\s>]/i.test(artifact.content) || (artifact.content.includes('<style') && !artifact.content.includes('</style>')));
   const isError = artifact.type.toLowerCase() === 'error' || artifact.content.includes('Failed to generate');
   const isEssay = artifact.type === 'essay';
   const isActionBrief = artifact.type === 'action_brief';
@@ -299,12 +312,20 @@ export default function ArtifactViewer({ artifact, onClose }: ArtifactViewerProp
         ) : (
           <div className={`artifact-preview ${artifact.type} ${isEssay ? 'editorial-reader' : ''}`}>
             {isHtml ? (
-              <iframe
-                srcDoc={secureHtmlContent}
-                sandbox=""
-                title="HTML Artifact Preview"
-                className="html-iframe"
-              />
+              isHtmlTruncated ? (
+                <div className="error-display">
+                  <div className="error-icon">⚠️</div>
+                  <h4>HTML Generation Incomplete</h4>
+                  <p>The generated HTML document was truncated before visible body content could be produced. Please regenerate using the HTML/CSS button.</p>
+                </div>
+              ) : (
+                <iframe
+                  srcDoc={secureHtmlContent}
+                  sandbox=""
+                  title="HTML Artifact Preview"
+                  className="html-iframe"
+                />
+              )
             ) : isError ? (
               <div className="error-display">
                 <div className="error-icon">⚠️</div>
