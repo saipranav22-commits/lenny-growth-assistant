@@ -181,9 +181,11 @@ async def chat(body: ChatRequest, db: DBSession = Depends(get_db)):
             )
             
     except Exception as exc:
-        logger.error(f"Retrieval error: {exc}")
-        augmented_message = body.message
-        citations = []
+        logger.error("Transcript retrieval failed: %s", exc, exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail="Transcript retrieval failed. Please try again."
+        )
 
     # 5. Call Pi bridge
     try:
@@ -310,6 +312,42 @@ async def ship30_endpoint(body: Ship30Request, background_tasks: BackgroundTasks
     return msg
 from typing import Optional
 
+def extract_clean_html(raw_content: str) -> str:
+    """Extract clean, renderable HTML/CSS without markdown fences or conversational prose."""
+    if not raw_content:
+        return ""
+    text = raw_content.strip()
+
+    # 1. Strip markdown code fence if present
+    fence_match = re.search(r'```(?:html)?\s*([\s\S]*?)\s*```', text, re.IGNORECASE)
+    if fence_match:
+        extracted = fence_match.group(1).strip()
+        if "<" in extracted and ">" in extracted:
+            text = extracted
+    else:
+        # Fallback for fence with missing closing
+        if text.startswith("```"):
+            lines = text.splitlines()
+            start = 1
+            end = len(lines)
+            for idx in range(1, len(lines)):
+                if lines[idx].strip().startswith("```"):
+                    end = idx
+                    break
+            text = "\n".join(lines[start:end]).strip()
+
+    # 2. Strip any conversational preamble before HTML tags
+    tag_match = re.search(r'(<!DOCTYPE\s+html|<html[\s>]|<div[\s>]|<main[\s>]|<section[\s>])', text, re.IGNORECASE)
+    if tag_match:
+        text = text[tag_match.start():]
+
+    # 3. Strip any conversational outro after </html>
+    close_match = re.search(r'</html>', text, re.IGNORECASE)
+    if close_match:
+        text = text[:close_match.end()]
+
+    return text.strip()
+
 class ArtifactRequest(BaseModel):
     session_id: str
     topic: str
@@ -321,44 +359,70 @@ class ArtifactRequest(BaseModel):
 
 @app.post("/api/artifacts", response_model=MessageOut, tags=["artifacts"])
 async def create_artifact(body: ArtifactRequest, db: DBSession = Depends(get_db)):
+    # 1. Load recent conversation history for active session (bounded to last 10 messages)
+    existing_msgs: list[Message] = (
+        db.query(Message)
+        .filter(Message.session_id == body.session_id)
+        .order_by(Message.created_at.desc())
+        .limit(10)
+        .all()
+    )
+    existing_msgs.reverse()
+    history = [
+        {"role": m.role, "content": m.content}
+        for m in existing_msgs
+        if m.content
+    ]
+
+    # 2. Determine topic for retrieval
+    search_topic = body.topic.strip() if body.topic else ""
+    if (not search_topic or search_topic.lower() in ["summarize the conversation", "write about the main topic of our conversation"]) and history:
+        for m in reversed(history):
+            if m.get("role") == "user" and m.get("content"):
+                search_topic = m["content"]
+                break
+    if not search_topic:
+        search_topic = body.topic or ""
+
+    # 3. Retrieve authentic podcast transcript evidence from database
     context_str = ""
     citations_data = []
-    
-    if body.format == "action_brief":
-        # Fetch RAG context directly
-        topic = body.topic
-        or_query_str = " | ".join([w for w in re.findall(r'\w+', topic) if len(w) > 3])
-        query = text("""
-            SELECT c.id as chunk_id, c.content, d.id as doc_id, d.title, d.guest, d.source_file,
-                   ts_rank(c.search_vector, to_tsquery('english', :or_q)) as rank
-            FROM chunks c
-            JOIN documents d ON c.document_id = d.id
-            WHERE (:or_q != '' AND c.search_vector @@ to_tsquery('english', :or_q))
-               OR c.search_vector @@ websearch_to_tsquery('english', :q)
-            ORDER BY rank DESC
-            LIMIT 3
-        """)
-        try:
-            results = db.execute(query, {"q": topic, "or_q": or_query_str}).fetchall()
-            context_blocks = []
-            for row in results:
-                chunk_id, content, doc_id, title, guest, source_file, rank = row
-                context_blocks.append(f"Source: {title}\n{content}")
-                citations_data.append({
-                    "title": title, 
-                    "guest": guest, 
-                    "source_file": source_file,
-                    "document_id": str(doc_id),
-                    "chunk_id": str(chunk_id),
-                    "content": content
-                })
+    words = [w for w in re.findall(r'\w+', search_topic) if len(w) > 3]
+    or_query_str = " | ".join(words) if words else ""
+    query = text("""
+        SELECT c.id as chunk_id, c.content, d.id as doc_id, d.title, d.guest, d.source_file,
+               ts_rank(c.search_vector, to_tsquery('english', :or_q)) as rank
+        FROM chunks c
+        JOIN documents d ON c.document_id = d.id
+        WHERE (:or_q != '' AND c.search_vector @@ to_tsquery('english', :or_q))
+           OR c.search_vector @@ websearch_to_tsquery('english', :q)
+        ORDER BY rank DESC
+        LIMIT 3
+    """)
+    try:
+        results = db.execute(query, {"q": search_topic, "or_q": or_query_str}).fetchall()
+        context_blocks = []
+        for row in results:
+            chunk_id, content, doc_id, title, guest, source_file, rank = row
+            context_blocks.append(f"Source: {title} (Guest: {guest})\n{content}")
+            citations_data.append({
+                "title": title,
+                "guest": guest,
+                "source_file": source_file,
+                "document_id": str(doc_id),
+                "chunk_id": str(chunk_id),
+                "content": content
+            })
+        if context_blocks:
             context_str = "\n\n".join(context_blocks)
-        except Exception as e:
-            pass
+    except Exception as exc:
+        logger.error("Artifact transcript retrieval failed: %s", exc, exc_info=True)
+        raise HTTPException(status_code=500, detail="Transcript retrieval failed. Please try again.")
 
-        founder_context = ""
-        if body.company_stage or body.team_size or body.current_challenge or body.primary_constraint:
-            founder_context = f"""
+    # 4. Founder context
+    founder_context = ""
+    if body.company_stage or body.team_size or body.current_challenge or body.primary_constraint:
+        founder_context = f"""
 === FOUNDER CONTEXT ===
 Company Stage: {body.company_stage or 'Not specified'}
 Team Size: {body.team_size or 'Not specified'}
@@ -366,6 +430,14 @@ Current Challenge: {body.current_challenge or 'Not specified'}
 Primary Constraint: {body.primary_constraint or 'Not specified'}
 === END FOUNDER CONTEXT ===
 """
+
+    # 5. Build prompt per format
+    if body.format == "action_brief":
+        evidence_block = (
+            f"=== EVIDENCE ===\n{context_str}\n=== END EVIDENCE ==="
+            if context_str
+            else "=== EVIDENCE ===\nNo relevant podcast transcripts found for this topic.\n=== END EVIDENCE ==="
+        )
         prompt = f"""Create an Action Brief based on the following topic: {body.topic}.
 {founder_context}
 Based ONLY on the following transcripts and the founder's context, generate the brief.
@@ -379,34 +451,75 @@ Format the output in Markdown with the following STRICT sections:
 7. Potential risk or limitation.
 8. Genuine supporting citations.
 
-Clearly distinguish User-provided information, Verified podcast evidence, and Model-generated interpretation and suggestions. Do not invent company facts, historical outcomes, podcast quotes or source references. If evidence is insufficient, explain the limitation instead of manufacturing personalized authority.
+Clearly distinguish User-provided information, Verified podcast evidence, and Model-generated interpretation and suggestions. Do not invent company facts, historical outcomes, podcast quotes or source references. If transcript evidence is insufficient or missing, communicate this limitation explicitly in the brief instead of manufacturing personalized authority.
 
-=== EVIDENCE ===
-{context_str}
-=== END EVIDENCE ===
+{evidence_block}
 """
+    elif body.format == "html/css":
+        evidence_prompt = (
+            f"\n=== PODCAST EVIDENCE ===\n{context_str}\n=== END EVIDENCE ===\n"
+            if context_str
+            else "\n=== PODCAST EVIDENCE ===\nNo relevant podcast transcripts found for this topic.\n=== END EVIDENCE ===\n"
+        )
+        limitation_rule = (
+            "Ground all insights strictly in the provided PODCAST EVIDENCE. Do NOT invent podcast facts, quotes, or citations."
+            if context_str
+            else "Transcript evidence is insufficient for this topic. Explicitly communicate this limitation in the document rather than inventing podcast facts or claims."
+        )
+        prompt = f"""You are an expert product strategist and UI designer.
+Create a complete, beautifully designed, standalone HTML/CSS page summarizing tactical growth advice for: {body.topic}.
+{founder_context}{evidence_prompt}
+MANDATORY RULES:
+1. Return ONLY the raw, renderable HTML document.
+2. Embed all CSS styles inside a <style> block in the <head>. Include elegant typography, modern color palette, card components, metrics, and structured sections.
+3. NEVER output markdown code blocks or code fences (NEVER write ```html or ```).
+4. NEVER output any conversational intro, explanation, or outro text before or after the HTML.
+5. The output MUST begin directly with <!DOCTYPE html> or <html>.
+6. Do NOT include any <script> tags or JavaScript.
+7. {limitation_rule}"""
     else:
-        prompt = f"Create a {body.format} artifact about {body.topic}. Make it highly structured, actionable, and visually clear."
+        evidence_prompt = (
+            f"\n=== PODCAST EVIDENCE ===\n{context_str}\n=== END EVIDENCE ===\n"
+            if context_str
+            else "\n=== PODCAST EVIDENCE ===\nNo relevant podcast transcripts found for this topic.\n=== END EVIDENCE ===\n"
+        )
+        limitation_rule = (
+            "Ground all insights strictly in the provided PODCAST EVIDENCE. Clearly distinguish verified podcast evidence from interpretations. Do NOT invent podcast facts, quotes, or citations."
+            if context_str
+            else "Transcript evidence is insufficient for this topic. Explicitly communicate this limitation in the document rather than inventing podcast facts or claims."
+        )
+        prompt = f"""Create a comprehensive, highly structured Markdown artifact about: {body.topic}.
+{founder_context}{evidence_prompt}
+MANDATORY GUIDELINES:
+1. Format with clear Markdown headings, bullet points, and actionable takeaways.
+2. {limitation_rule}
+3. Distinguish clearly between verified podcast evidence and recommendations.
+4. Do NOT hallucinate fake citations or invent quotes."""
 
-    
-    # Simple call to the LLM
+    # 6. Call Bridge with current-session history
     try:
         res = await call_bridge(
             session_id=str(body.session_id),
             message=prompt,
-            history=[],
+            history=history,
             disable_tools=True,
             provider=settings.llm_provider,
             model=settings.llm_model
         )
     except Exception as e:
+        logger.error("Bridge error in create_artifact: %s", e)
         raise HTTPException(status_code=500, detail=str(e))
-        
-    answer = sanitize_for_db(res.get("answer", "Could not generate artifact."))
-    citations = sanitize_for_db(res.get("citations", []))
-    if not citations and citations_data:
-        citations = sanitize_for_db(citations_data)
-    
+
+    raw_answer = (res.get("answer") or "").strip()
+    if not raw_answer:
+        raw_answer = "Could not generate artifact."
+    if body.format == "html/css":
+        raw_answer = extract_clean_html(raw_answer)
+    answer = sanitize_for_db(raw_answer)
+
+    # Citations must strictly derive from authentic database records, never hallucinated from LLM output
+    citations = sanitize_for_db(citations_data)
+
     msg = Message(
         session_id=body.session_id,
         role='assistant',
@@ -420,7 +533,7 @@ Clearly distinguish User-provided information, Verified podcast evidence, and Mo
     db.add(msg)
     db.commit()
     db.refresh(msg)
-    
+
     return MessageOut.model_validate(msg)
 
 @app.get("/api/sessions/{session_id}/artifacts", response_model=list[MessageOut], tags=["artifacts"])

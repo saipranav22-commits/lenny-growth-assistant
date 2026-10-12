@@ -129,6 +129,57 @@ function App() {
     }
   }, [activeId]);
 
+  const generatingEssay = messages.find(
+    m => m.artifact_type === 'essay' && m.artifact_content === 'GENERATING...'
+  );
+  const isEssayGenerating = !!generatingEssay;
+
+  // Bounded polling for background Ship 30 essay generation
+  useEffect(() => {
+    if (!activeId || !generatingEssay) return;
+
+    let attempts = 0;
+    const maxAttempts = 40; // 40 * 2.5s = 100s bounded polling
+    const targetMsgId = generatingEssay.id;
+
+    const timer = setInterval(async () => {
+      attempts += 1;
+      if (attempts >= maxAttempts) {
+        clearInterval(timer);
+        return;
+      }
+
+      try {
+        const latestMsgs = await fetchChatHistory(activeId);
+        setMessages(latestMsgs);
+
+        const currentTarget = latestMsgs.find(m => m.id === targetMsgId);
+        if (currentTarget) {
+          if (currentTarget.artifact_content !== 'GENERATING...') {
+            clearInterval(timer);
+            setActiveArtifact(prev => {
+              if (prev && prev.id === targetMsgId) {
+                return {
+                  id: currentTarget.id,
+                  type: currentTarget.artifact_type || prev.type,
+                  content: currentTarget.artifact_content || prev.content,
+                  citations: currentTarget.citations || prev.citations
+                };
+              }
+              return prev;
+            });
+          }
+        }
+      } catch (err) {
+        console.error('Ship 30 essay polling error:', err);
+      }
+    }, 2500);
+
+    return () => {
+      clearInterval(timer);
+    };
+  }, [activeId, generatingEssay?.id, generatingEssay?.artifact_content]);
+
   async function loadSessions() {
     try {
       const data = await fetchSessions();
@@ -215,6 +266,11 @@ function App() {
       return;
     }
 
+    if (type === 'essay' && isEssayGenerating) {
+      setError('A Ship 30 essay is already generating for this conversation. Please wait for it to complete.');
+      return;
+    }
+
     setLoading(true);
     setError(null);
 
@@ -247,7 +303,16 @@ function App() {
         const errData = await res.json().catch(()=>({}));
         throw new Error(errData.detail || 'Failed to generate artifact');
       }
+      const newMsg: MessageOut = await res.json();
       await loadHistory(activeId);
+      if (newMsg && newMsg.artifact_type && newMsg.artifact_content) {
+        setActiveArtifact({
+          id: newMsg.id,
+          type: newMsg.artifact_type,
+          content: newMsg.artifact_content,
+          citations: newMsg.citations || undefined
+        });
+      }
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -541,13 +606,22 @@ function App() {
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--accent-experiment)" strokeWidth="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>
               Strategy Brief
             </button>
-            <button className="artifact-btn" disabled={loading || !activeId} onClick={() => generateArtifact('essay')}>
+            <button
+              className="artifact-btn"
+              disabled={loading || !activeId || isEssayGenerating}
+              onClick={() => generateArtifact('essay')}
+              title={isEssayGenerating ? 'Ship 30 Essay generation in progress...' : 'Generate Ship 30 Essay'}
+            >
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--accent-evidence)" strokeWidth="2"><path d="M12 20h9"></path><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path></svg>
-              Ship 30 Essay
+              {isEssayGenerating ? 'Generating...' : 'Ship 30 Essay'}
             </button>
             <button className="artifact-btn" disabled={loading || !activeId} onClick={() => generateArtifact('markdown')}>
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>
               Raw MD
+            </button>
+            <button className="artifact-btn" disabled={loading || !activeId} onClick={() => generateArtifact('html/css')}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--accent-focus, #3B82F6)" strokeWidth="2"><polyline points="16 18 22 12 16 6"></polyline><polyline points="8 6 2 12 8 18"></polyline></svg>
+              HTML/CSS
             </button>
           </div>
 

@@ -92,6 +92,50 @@ export function stripOuterCodeFences(text: string): string {
   return remaining.join('\n');
 }
 
+/**
+ * Safely prepares HTML content for the sandboxed iframe preview.
+ * - Strips outer enclosing code fences (```html ... ```) if present.
+ * - Preserves complete HTML document structure (<!DOCTYPE html>, <html>, <head>, <body>).
+ * - Enforces the strict Content Security Policy inside <head>.
+ * - Wraps HTML fragments cleanly without corrupting document structure.
+ */
+export function prepareSecureHtml(rawContent: string): string {
+  if (!rawContent) return '';
+  const content = stripOuterCodeFences(rawContent).trim();
+
+  const cspMeta = `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src 'none'; script-src 'none';">`;
+
+  // Check if content is already a full HTML document
+  const isFullDoc = /<!doctype\s+html/i.test(content) || /<html[\s>]/i.test(content);
+
+  if (isFullDoc) {
+    if (/<head[\s>]/i.test(content)) {
+      if (!content.includes('Content-Security-Policy')) {
+        return content.replace(/<head([^>]*)>/i, `<head$1>\n    ${cspMeta}`);
+      }
+      return content;
+    }
+    if (/<html[\s>]/i.test(content)) {
+      return content.replace(/<html([^>]*)>/i, `<html$1>\n  <head>\n    ${cspMeta}\n  </head>`);
+    }
+    return `${cspMeta}\n${content}`;
+  }
+
+  // HTML fragment: wrap in standard container
+  return `<!DOCTYPE html>
+<html>
+  <head>
+    ${cspMeta}
+    <style>
+      body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; padding: 20px; line-height: 1.6; color: #333; }
+    </style>
+  </head>
+  <body>
+    ${content}
+  </body>
+</html>`;
+}
+
 export default function ArtifactViewer({ artifact, onClose }: ArtifactViewerProps) {
   const [activeTab, setActiveTab] = useState<'preview' | 'source'>('preview');
   const [copied, setCopied] = useState(false);
@@ -110,20 +154,7 @@ export default function ArtifactViewer({ artifact, onClose }: ArtifactViewerProp
   const isActionBrief = artifact.type === 'action_brief';
 
   // Secure HTML wrapper
-  const secureHtmlContent = `
-    <!DOCTYPE html>
-    <html>
-      <head>
-        <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src 'none'; script-src 'none';">
-        <style>
-          body { font-family: sans-serif; padding: 20px; line-height: 1.6; color: #333; }
-        </style>
-      </head>
-      <body>
-        ${artifact.content}
-      </body>
-    </html>
-  `;
+  const secureHtmlContent = prepareSecureHtml(artifact.content);
 
   // Clean up legacy mojibake characters (UTF-8 bytes misinterpreted as latin-1)
   const sanitizedContent = (artifact.content || '')
@@ -225,6 +256,8 @@ export default function ArtifactViewer({ artifact, onClose }: ArtifactViewerProp
             <><span className="icon">💡</span><h3>Strategy Action Brief</h3></>
           ) : isEssay ? (
             <><span className="icon">📝</span><h3>Ship 30 Editorial</h3></>
+          ) : isHtml ? (
+            <><span className="icon">🌐</span><h3>HTML / CSS ARTIFACT</h3></>
           ) : (
             <><span className="icon">📄</span><h3>{artifact.type.toUpperCase()}</h3></>
           )}
